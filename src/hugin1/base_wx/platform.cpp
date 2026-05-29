@@ -268,8 +268,6 @@ wxString MacGetPathToMainExecutableFileOfRegisteredBundle(CFStringRef BundleIden
     return theResult;
 }
 
-#if defined MAC_SELF_CONTAINED_BUNDLE
-
 wxString MacGetPathToBundledAppMainExecutableFile(CFStringRef appname)
 {
     wxString theResult = wxEmptyString;
@@ -488,8 +486,6 @@ wxString MacGetPathToUserAppSupportAutoPanoFolder()
     return appSupportAutoPanoFolder;
 }
 
-
-#endif // MAC_SELF_CONTAINED_BUNDLE
 
 #endif // __WXMAC__
 

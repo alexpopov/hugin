@@ -60,7 +60,7 @@
 
 #include <wx/cmdline.h>
 
-#if defined MAC_SELF_CONTAINED_BUNDLE
+#if defined __WXMAC__
   #include <wx/dir.h>
   #include <CoreFoundation/CFBundle.h>
 #endif
@@ -150,7 +150,7 @@ HuginBase::CPVector AutoCtrlPointCreator::readUpdatedControlPoints(const std::st
     return ctrlPoints;
 }
 
-#if defined MAC_SELF_CONTAINED_BUNDLE
+#if defined __WXMAC__
 wxString GetBundledProg(wxString progName)
 {
     // First check inside the bundle for (AutoCP generator "without path"), e.g. binary name with path stripped off
@@ -165,7 +165,7 @@ wxString GetBundledProg(wxString progName)
 
 wxString GetProgPath(wxString progName)
 {
-#if defined MAC_SELF_CONTAINED_BUNDLE
+#if defined __WXMAC__
     wxString bundled=GetBundledProg(progName);
     if(!bundled.IsEmpty())
         return bundled;
@@ -191,7 +191,7 @@ wxString GetProgPath(wxString progName)
 
 bool CanStartProg(wxString progName,wxWindow* parent)
 {
-#if defined MAC_SELF_CONTAINED_BUNDLE
+#if defined __WXMAC__
     if(!GetBundledProg(progName).IsEmpty())
         return true;
 #endif

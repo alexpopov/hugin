@@ -60,16 +60,12 @@ CFStringRef MacCreateCFStringWithWxString(const wxString& string);
 wxString MacGetPathToMainExecutableFileOfBundle(CFStringRef bundlePath);
 wxString MacGetPathToMainExecutableFileOfRegisteredBundle(CFStringRef BundleIdentifier);
 
-#if defined MAC_SELF_CONTAINED_BUNDLE
-
 wxString MacGetPathToBundledResourceFile(CFStringRef filename);
 wxString MacGetPathToBundledFrameworksDirectory();
 wxString MacGetPathToBundledExecutableFile(CFStringRef filename);
 wxString MacGetPathToBundledAppMainExecutableFile(CFStringRef appname);
 wxString MacGetPathToUserDomainTempDir();
 wxString MacGetPathToUserAppSupportAutoPanoFolder();
-
-#endif // MAC_SELF_CONTAINED_BUNDLE
 
 #endif //__WXMAC__
 

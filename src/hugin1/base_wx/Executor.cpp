@@ -30,7 +30,7 @@
 #include <wx/filename.h>
 #include <wx/log.h>
 #include <wx/translation.h>
-#if defined __WXMAC__ && defined MAC_SELF_CONTAINED_BUNDLE
+#if defined __WXMAC__
 #include "base_wx/platform.h"
 #endif
 #include "base_wx/wxPlatform.h"
@@ -128,7 +128,7 @@ namespace HuginQueue
     // return path in internal program (program that is shipped with Hugin)
     wxString GetInternalProgram(const wxString& bindir, const wxString& name)
     {
-#if defined __WXMAC__ && defined MAC_SELF_CONTAINED_BUNDLE
+#if defined __WXMAC__
         CFStringRef filename = MacCreateCFStringWithWxString(name);
         wxString fn = MacGetPathToBundledExecutableFile(filename);
         CFRelease(filename);
@@ -147,7 +147,7 @@ namespace HuginQueue
     // as specified in preferences
     wxString GetExternalProgram(wxConfigBase * config, const wxString& bindir, const wxString& name)
     {
-#if defined __WXMAC__ && defined MAC_SELF_CONTAINED_BUNDLE
+#if defined __WXMAC__
         if (config->Read(name + "/Custom", 0l))
         {
             wxString fn = config->Read(name + "/Exe", wxEmptyString);
