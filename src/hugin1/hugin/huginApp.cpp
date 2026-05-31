@@ -629,11 +629,17 @@ bool huginApp::OnInit()
 		//load tip startup preferences (tips will be started after splash terminates)
 		int nValue = config->Read("/MainFrame/ShowStartTip", 1l);
 
-		//show tips if needed now
+		//show tips if needed (deferred to the main event loop — calling
+		//OnTipOfDay synchronously from OnInit spawns a nested modal
+		//session before wxApp::OnRun starts, which deadlocks under
+		//Rosetta on macOS 14+ inside CABackingStoreGetFrontTexture
+		//waiting on dispatch queue ownership).
 		if(nValue > 0)
 		{
-			wxCommandEvent dummy;
-			frame->OnTipOfDay(dummy);
+			frame->CallAfter([this]() {
+				wxCommandEvent dummy;
+				frame->OnTipOfDay(dummy);
+			});
 		}
 	}
 

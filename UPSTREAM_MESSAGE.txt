@@ -1,0 +1,59 @@
+Subject: macOS build broken on Apple Silicon — proposal to fix
+
+Hi,
+
+I'm a long-time Hugin user trying to get a native arm64 build going on
+my M-series Mac, since the Homebrew cask is deprecated (it's x86_64
+under Rosetta and deadlocks on the Tip-of-the-Day dialog on macOS 14+).
+I'd like to contribute fixes upstream rather than just keep them in a
+local fork.
+
+What I ran into following mac/README.md's official path:
+
+1. mac/ExternalPrograms/scripts/download-all.sh:
+   Several source URLs no longer resolve — most notably the boost
+   1.75 jfrog URL (jfrog dropped public hosting), the libffi
+   sourceware ftp link, and a few SourceForge mirror rotations.
+
+2. mac/ExternalPrograms/scripts/SetEnv.sh:
+   - CC/CXX hardcoded to /usr/local/opt/llvm (Intel Homebrew path).
+   - OPTIMIZE="-march=core2" is x86-only and breaks the arm64 build.
+   - DEPLOY_TARGET="10.10" predates Apple Silicon's 11.0 floor.
+
+3. mac/PackageMacAppBundleLibs.sh:
+   It uses 'otool -L' output directly with 'cp', which fails on modern
+   brew dylibs that reference dependencies via @rpath/... rather than
+   absolute paths. The script doesn't resolve @rpath via the binary's
+   LC_RPATH entries before copying.
+
+Source itself is in good shape — Hugin's own code already supports
+exiv2 0.28 and OpenEXR 3.x. The breakage is purely in the macOS
+ExternalPrograms tooling and the install-time bundle script.
+
+I'd like to send a small PR for what I'm calling "tier 1": fix the
+broken URLs at the existing version pins, and make SetEnv.sh detect
+arm64 vs x86_64 (swap llvm prefix, drop the -march, bump deploy
+target conditionally). That should restore the official build path
+on Apple Silicon without touching dep versions.
+
+If well-received, follow-ups would be: bump deps to current upstream
+(exiv2 0.28, OpenEXR 3, wxWidgets 3.2, vigra 1.12, etc.), and fix
+the @rpath resolution in PackageMacAppBundleLibs.sh.
+
+I have a working build locally (Homebrew deps for now, with two small
+runtime patches against the default tree — one bumps the deployment
+target to 11.0 so std::filesystem works, the other decouples the
+bundled-tool lookup from MAC_SELF_CONTAINED_BUNDLE so non-self-contained
+builds can still find their own CLI tools). Happy to share both as
+separate small PRs.
+
+Before I start submitting: is anyone already working on this? Any
+preference on patch organization, version-bump policy, or whether to
+keep the bundled-deps flow vs. open up to system deps? I'd rather
+align on direction first than land something orthogonal to what you
+want.
+
+Thanks for keeping Hugin alive.
+
+Alex
+hello@alexpopov.ca
