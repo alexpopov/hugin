@@ -1,59 +1,120 @@
-Subject: macOS build broken on Apple Silicon — proposal to fix
+Subject: macOS: Tip-of-the-Day deadlock on Rosetta — root cause and 5-line fix
 
 Hi,
 
-I'm a long-time Hugin user trying to get a native arm64 build going on
-my M-series Mac, since the Homebrew cask is deprecated (it's x86_64
-under Rosetta and deadlocks on the Tip-of-the-Day dialog on macOS 14+).
-I'd like to contribute fixes upstream rather than just keep them in a
-local fork.
+I traced the long-standing "Hugin freezes on launch under Rosetta on
+recent macOS" issue (which led to the Homebrew cask being deprecated
+and disabled) down to a specific synchronisation problem, and have a
+small patch I'd like to upstream.
 
-What I ran into following mac/README.md's official path:
+== Symptom ==
 
-1. mac/ExternalPrograms/scripts/download-all.sh:
-   Several source URLs no longer resolve — most notably the boost
-   1.75 jfrog URL (jfrog dropped public hosting), the libffi
-   sourceware ftp link, and a few SourceForge mirror rotations.
+On Apple Silicon Macs running macOS 14+, launching Hugin (any x86_64
+build, e.g. the deprecated Homebrew cask) hangs at startup. The
+Tip-of-the-Day dialog is supposed to appear but never paints; the app
+sits at >100% CPU and never reaches the main window. Existing
+workarounds — disabling the tip via /MainFrame/ShowStartTip=0 in the
+prefs file — don't take because the user can't dismiss the dialog
+that fails to render in the first place.
 
-2. mac/ExternalPrograms/scripts/SetEnv.sh:
-   - CC/CXX hardcoded to /usr/local/opt/llvm (Intel Homebrew path).
-   - OPTIMIZE="-march=core2" is x86-only and breaks the arm64 build.
-   - DEPLOY_TARGET="10.10" predates Apple Silicon's 11.0 floor.
+== Root cause ==
 
-3. mac/PackageMacAppBundleLibs.sh:
-   It uses 'otool -L' output directly with 'cp', which fails on modern
-   brew dylibs that reference dependencies via @rpath/... rather than
-   absolute paths. The script doesn't resolve @rpath via the binary's
-   LC_RPATH entries before copying.
+huginApp::OnInit calls frame->OnTipOfDay(dummy) synchronously, before
+wxApp::OnRun starts the main event loop:
 
-Source itself is in good shape — Hugin's own code already supports
-exiv2 0.28 and OpenEXR 3.x. The breakage is purely in the macOS
-ExternalPrograms tooling and the install-time bundle script.
+    src/hugin1/hugin/huginApp.cpp:~636
+        if(nValue > 0)
+        {
+            wxCommandEvent dummy;
+            frame->OnTipOfDay(dummy);   // ← synchronous, pre-mainloop
+        }
 
-I'd like to send a small PR for what I'm calling "tier 1": fix the
-broken URLs at the existing version pins, and make SetEnv.sh detect
-arm64 vs x86_64 (swap llvm prefix, drop the -march, bump deploy
-target conditionally). That should restore the official build path
-on Apple Silicon without touching dep versions.
+That spawns a *nested* AppKit modal session in a pre-mainloop context.
+On native arm64 this works fine; under Rosetta it deadlocks inside
+CoreAnimation's CABackingStoreGetFrontTexture, which does a sync
+dispatch to the RenderServer queue. Across the x86_64↔arm64 translation
+boundary the dispatch queue ownership lookup never returns:
 
-If well-received, follow-ups would be: bump deps to current upstream
-(exiv2 0.28, OpenEXR 3, wxWidgets 3.2, vigra 1.12, etc.), and fix
-the @rpath resolution in PackageMacAppBundleLibs.sh.
+  main → wxEntry → wxApp::CallOnInit → huginApp::OnInit
+    → frame->OnTipOfDay → wxShowTip → wxDialog::ShowModal
+      → wxModalEventLoop::OSXDoRun → NSApplication runModalSession
+        → CA::Transaction::commit → CABackingStoreGetFrontTexture
+          → _dispatch_sync_f_slow
+            → _dispatch_event_loop_wait_for_ownership  ← stuck
 
-I have a working build locally (Homebrew deps for now, with two small
-runtime patches against the default tree — one bumps the deployment
-target to 11.0 so std::filesystem works, the other decouples the
-bundled-tool lookup from MAC_SELF_CONTAINED_BUNDLE so non-self-contained
-builds can still find their own CLI tools). Happy to share both as
-separate small PRs.
+Empirical confirmation on my Apple Silicon Mac:
 
-Before I start submitting: is anyone already working on this? Any
-preference on patch organization, version-bump policy, or whether to
-keep the bundled-deps flow vs. open up to system deps? I'd rather
-align on direction first than land something orthogonal to what you
-want.
+  1. With ShowStartTip=1 (default), the cask Hugin under Rosetta
+     deadlocks. Sampled stack matches the above exactly.
 
-Thanks for keeping Hugin alive.
+  2. With ShowStartTip=0 (forced via prefs file edit, since the dialog
+     can't be dismissed), the SAME binary runs healthily. Sampled
+     stack lands cleanly in wxApp::OnRun → wxAppConsoleBase::MainLoop
+     → NSApplication run → _DPSNextEvent → mach_msg (idle).
+
+So the deadlock is specifically the modal-during-OnInit pattern under
+Rosetta, not any other macOS 14+ change.
+
+== Fix ==
+
+Defer the tip invocation to the next event loop iteration via
+frame->CallAfter(...). By the time the lambda runs, OnInit has
+returned, wxApp::OnRun is active, and the modal dialog opens in a
+normal AppKit modal session context — identical to how the existing
+Help menu → "Show Tip of the Day" invocation has always worked.
+
+  if(nValue > 0)
+  {
+      frame->CallAfter([this]() {
+          wxCommandEvent dummy;
+          frame->OnTipOfDay(dummy);
+      });
+  }
+
+5-line change. Tested on native arm64 (no regression in tip display
+behaviour). I couldn't trivially test the patched x86_64 binary under
+Rosetta on my machine without a full x86_64 build, but given (1) the
+deadlock is empirically the modal-in-OnInit pattern and (2) CallAfter
+posts the same call to the post-OnInit loop context, the fix should
+resolve it. Happy to do the x86_64 build to confirm if you'd like.
+
+This patch would in effect un-break the Homebrew cask for every
+existing user on macOS 14+ without any rebuild on their side.
+
+== Separately, native arm64 build ==
+
+While diagnosing, I also did a from-source native arm64 build using
+Homebrew dependencies (it's the only path I could find that works
+today; the mac/ExternalPrograms/scripts/ flow needs some refresh —
+broken download URLs, Intel-only -march/llvm paths in SetEnv.sh).
+
+That work resulted in two more small patches I'd like to upstream
+separately if you're interested:
+
+  - Bump CMAKE_OSX_DEPLOYMENT_TARGET from 10.9 to 11.0 (Hugin's own
+    std::filesystem usage requires 10.15+; 11.0 is the Apple Silicon
+    floor anyway).
+
+  - Decouple the runtime bundle tool-lookup
+    (MacGetPathToBundledExecutableFile) from MAC_SELF_CONTAINED_BUNDLE
+    so that non-self-contained Homebrew-deps builds can still find
+    their own CLI tools inside Hugin.app/Contents/MacOS/.
+
+These are smaller and less critical than the tip-of-day fix, but the
+combination of all three is what made a working arm64 build possible
+for me. Code visible in my mirror branch at:
+https://github.com/alexpopov/hugin/tree/macos-arm64-build
+
+I'd send the tip-of-day patch first as a discrete PR/ticket since it
+fixes a user-visible regression. The two arm64 patches could follow
+together as a "build path also works with Homebrew deps" change.
+Refreshing the mac/ExternalPrograms scripts to actually produce a
+modern self-contained .app on Apple Silicon is a much bigger job that
+I'd love to take on if it'd be welcome, but want to align with you on
+direction before sinking time into it.
+
+Thanks for keeping Hugin alive — it's a brilliant tool.
 
 Alex
 hello@alexpopov.ca
+https://github.com/alexpopov/hugin
